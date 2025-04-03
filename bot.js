@@ -80,10 +80,10 @@ export default class Bot {
         }
     }
 
-    async sendCheckIn(user) {
-        try {
-            const questions = this.getCheckInQuestions();
-            const dmChannel = await user.createDM();
+  async sendCheckIn(user) {
+    try {
+      const questions = this.getCheckInQuestions();
+      const dmChannel = await user.createDM();
 
             await dmChannel.send(
                 '**Daily Check-in: Please answer the following questions:**'
