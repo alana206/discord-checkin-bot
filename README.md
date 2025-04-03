@@ -9,7 +9,7 @@
 This stack is lightweight, modern, and well-suited for building a Discord bot with scheduling and interaction capabilities. Let me know if you'd like to expand or modify any part of it!
 
 ```js
-// npm packages needed E
+// npm packages needed
 
 npm install discord.js dotenv node-schedule nodemon
 ```
