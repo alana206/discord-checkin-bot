@@ -5,8 +5,12 @@ yarn-debug.log*
 yarn-error.log*
 
 # Environment variables
+<<<<<<< Updated upstream
+./.env
 .env
+=======
 
+>>>>>>> Stashed changes
 # Logs
 logs/
 *.log
@@ -26,3 +30,7 @@ Thumbs.db
 # Build files
 dist/
 build/
+.env
+/.gitignore
+
+*
