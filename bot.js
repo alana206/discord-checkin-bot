@@ -5,10 +5,11 @@ import "dotenv/config";
 
 
 export default class Bot {
-  constructor(token, channelId, responseChannelId, questions) {
+  constructor(token, channelId, responseChannelId, checkInChannelId, questions) {
     this.token = token;
     this.channelId = channelId;
     this.responseChannelId = responseChannelId;
+    this.checkInChannelId = checkInChannelId;
     this.questions = questions;
     this.client = new Client({
       intents: [
@@ -16,6 +17,7 @@ export default class Bot {
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions
       ],
     });
   }
@@ -24,6 +26,11 @@ export default class Bot {
     this.client.once('ready', () => {
       console.log('Bot is ready!');
       this.scheduleQuestions();
+      this.scheduleDailyCheckin();
+      this.client.user.setPresence({ 
+        activities: [{ name: 'Tracking Check-ins', type: 'Watching' }], 
+        status: 'online' 
+      });
     });
 
     this.client.login(this.token);
@@ -49,7 +56,7 @@ export default class Bot {
 
         for (const member of members.values()) {
           if (member.user.bot) continue; // Skip bots
-
+            
           const responses = {};
           for (const question of this.questions) {
             try {
@@ -85,5 +92,25 @@ export default class Bot {
         console.error('Error during scheduled job:', error);
       }
     });
+  }
+
+  scheduleDailyCheckin() {
+    if (this.checkInChannelId) {
+      schedule.scheduleJob({ hour: 9, minute: 0, tz: 'America/Los_Angeles' }, async () => {
+        try {
+          const checkInChannel = await this.client.channels.fetch(this.checkInChannelId);
+          if (checkInChannel && checkInChannel.isTextBased()) {
+            await checkInChannel.send("**Daily Check-in!** 👋 Please react to this message or say 'here' to indicate you're present and ready to code today!");
+          } else {
+            console.error('Could not find or access the check-in channel.');
+          }
+        } catch (error) {
+          console.error('Error sending daily check-in message:', error);
+        }
+      });
+      console.log('Daily check-in message scheduled.');
+    } else {
+      console.warn('CHECK_IN_CHANNEL_ID not found. Daily check-in not scheduled.');
+    }
   }
 }
