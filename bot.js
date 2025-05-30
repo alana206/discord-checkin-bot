@@ -1,16 +1,21 @@
-// bot.js
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import schedule from 'node-schedule';
-import "dotenv/config";
+import "dotenv/config"; 
 
 
 export default class Bot {
   constructor(token, channelId, responseChannelId, checkInChannelId, questions) {
+    if (!checkInChannelId) {
+      throw new Error('CHECK_IN_CHANNEL_ID is required');
+    }
     this.token = token;
     this.channelId = channelId;
     this.responseChannelId = responseChannelId;
     this.checkInChannelId = checkInChannelId;
     this.questions = questions;
+    this.scheduledJobs = [];
+    this.retryAttempts = 3;
+    this.retryDelay = 5 * 60 * 1000; // 5 minutes
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -23,94 +28,210 @@ export default class Bot {
   }
 
   async run() {
-    this.client.once('ready', () => {
-      console.log('Bot is ready!');
-      this.scheduleQuestions();
-      this.scheduleDailyCheckin();
-      this.client.user.setPresence({ 
-        activities: [{ name: 'Tracking Check-ins', type: 'Watching' }], 
-        status: 'online' 
+    try {
+      this.client.once('ready', () => {
+        console.log('Bot is ready!');
+        this.scheduleQuestions();
+        this.scheduleDailyCheckin();
+        this.client.user.setPresence({ 
+          activities: [{ name: 'Tracking Check-ins', type: 'Watching' }], 
+          status: 'online' 
+        });
       });
-    });
 
-    this.client.login(this.token);
+      this.client.on('error', error => {
+        console.error('Discord client error:', error);
+      });
+
+      await this.client.login(this.token);
+    } catch (error) {
+      console.error('Failed to start bot:', error);
+    }
   }
 
-  scheduleQuestions() {
-    // Schedule the job to run every weekday at 8 AM
-    // Using cron syntax: '0 8 * * 1-5' means at 08:00 AM every weekday (Monday to Friday)
-    schedule.scheduleJob('0 8 * * 1-5', async () => {
-      try {
-        const channel = await this.client.channels.fetch(this.channelId);
-        if (!channel) {
-          console.error(`Channel with ID ${this.channelId} not found.`);
-          return;
-        }
+  async scheduleQuestions() {
+    const job = schedule.scheduleJob(
+      { 
+        hour: 8, 
+        minute: 0, 
+        tz: 'America/Los_Angeles',
+        dayOfWeek: [1, 2, 3, 4, 5] // Monday through Friday
+      }, 
+      async () => {
+        console.log(`Scheduled check-in for: ${new Date().toLocaleString('en-US', { 
+          timeZone: 'America/Los_Angeles',
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        })}`);
 
-        const members = await channel.guild.members.fetch();
-        const textChannel = await this.client.channels.fetch(this.responseChannelId);
-        if (!textChannel) {
-          console.error(`Response channel with ID ${this.responseChannelId} not found.`);
-          return;
-        }
+        let attempt = 1;
+        const maxAttempts = this.retryAttempts;
 
-        for (const member of members.values()) {
-          if (member.user.bot) continue; // Skip bots
-            
-          const responses = {};
-          for (const question of this.questions) {
-            try {
-              const dmChannel = await member.user.createDM();
-              await dmChannel.send(question);
-              const collected = await dmChannel.awaitMessages({
-                filter: (m) => m.author.id === member.user.id,
-                max: 1,
-                time: 60 * 60 * 1000, // 1 hour timeout
-                errors: ['time'],
-              });
-              responses[question] = collected.first().content;
-            } catch (error) {
-              console.error(`Error sending DM to ${member.user.tag}:`, error);
-              responses[question] = 'No response';
+        while (attempt <= maxAttempts) {
+          try {
+            const channel = await this.client.channels.fetch(this.channelId);
+            if (!channel) {
+              throw new Error(`Channel with ID ${this.channelId} not found.`);
             }
+
+            const members = await channel.guild.members.fetch();
+            const textChannel = await this.client.channels.fetch(this.responseChannelId);
+            if (!textChannel) {
+              throw new Error(`Response channel with ID ${this.responseChannelId} not found.`);
+            }
+
+            // Process members with rate limiting
+            for (const member of members.values()) {
+              if (member.user.bot) continue;
+              
+              await this.processUserQuestions(member, textChannel);
+              // Add delay between members to avoid rate limiting
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            break; // Success - exit the retry loop
+            
+          } catch (error) {
+            console.error(`Error during scheduled job (Attempt ${attempt}):`, error);
+            if (attempt === maxAttempts) {
+              console.error('Max retry attempts reached. Giving up.');
+              return;
+            }
+            attempt++;
+            await new Promise(resolve => setTimeout(resolve, this.retryDelay));
           }
-          // Send the responses to the specific channel.
-          await textChannel.send({
-            content: `Responses from ${member.user.tag}:`,
-            embeds: [
-              new EmbedBuilder()
-                .setTitle('Weekly Check-in')
-                .setDescription(
-                  Object.entries(responses)
-                    .map(([question, answer]) => `**${question}**\n${answer}`)
-                    .join('\n\n')
-                ),
-            ],
-          });
         }
-      } catch (error) {
-        console.error('Error during scheduled job:', error);
       }
-    });
+    );
+
+    if (job) {
+      this.scheduledJobs.push(job);
+      console.log('Questions schedule created successfully');
+    } else {
+      throw new Error('Failed to create questions schedule');
+    }
+  }
+
+  async processUserQuestions(member, textChannel) {
+    const responses = {};
+    try {
+      const dmChannel = await member.user.createDM();
+      
+      for (const question of this.questions) {
+        try {
+          await dmChannel.send(question);
+          const collected = await dmChannel.awaitMessages({
+            filter: (m) => m.author.id === member.user.id,
+            max: 1,
+            time: 3 * 60 * 60 * 1000, // 3 hour timeout
+            errors: ['time'],
+          });
+          
+          const response = collected.first();
+          responses[question] = response ? response.content : 'No response';
+          // Clean up collected messages
+          if (response) {
+            await response.delete().catch(() => {});
+          }
+        } catch (error) {
+          console.error(`Error processing question for ${member.user.tag}:`, error);
+          responses[question] = 'No response received';
+        }
+      }
+
+      await textChannel.send({
+        content: `Responses from ${member.user.tag}:`,
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('Weekly Check-in')
+            .setDescription(
+              Object.entries(responses)
+                .map(([question, answer]) => `**${question}**\n${answer}`)
+                .join('\n\n')
+            )
+            .setTimestamp(),
+        ],
+      });
+    } catch (error) {
+      console.error(`Cannot send DM to ${member.user.tag}:`, error);
+      await textChannel.send(`Unable to collect responses from ${member.user.tag} - DMs may be disabled.`);
+    }
+  }
+
+  async validateCheckInChannel() {
+    try {
+      const channel = await this.client.channels.fetch(this.checkInChannelId);
+      if (!channel || !channel.isTextBased()) {
+        throw new Error(`Invalid check-in channel: ${this.checkInChannelId}`);
+      }
+      return channel;
+    } catch (error) {
+      console.error('Check-in channel validation failed:', error);
+      throw error;
+    }
+  }
+
+  async sendCheckInMessage(channel, attempt = 1) {
+    try {
+      const message = await channel.send({
+        content: "**Daily Check-in!** 👋 Please react to this message or say 'here' to indicate you're present and ready to code today!",
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('Daily Check-in')
+            .setDescription('React with 👋 or type "here" to check in')
+            .setTimestamp()
+        ]
+      });
+      console.log(`Check-in message sent successfully (Attempt ${attempt})`);
+      return message;
+    } catch (error) {
+      console.error(`Failed to send check-in message (Attempt ${attempt}):`, error);
+      if (attempt < this.retryAttempts) {
+        console.log(`Retrying in ${this.retryDelay/1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+        return this.sendCheckInMessage(channel, attempt + 1);
+      }
+      throw error;
+    }
   }
 
   scheduleDailyCheckin() {
-    if (this.checkInChannelId) {
-      schedule.scheduleJob({ hour: 9, minute: 0, tz: 'America/Los_Angeles' }, async () => {
+    const job = schedule.scheduleJob(
+      { hour: 9, minute: 0, tz: 'America/Los_Angeles' },
+      async () => {
         try {
-          const checkInChannel = await this.client.channels.fetch(this.checkInChannelId);
-          if (checkInChannel && checkInChannel.isTextBased()) {
-            await checkInChannel.send("**Daily Check-in!** 👋 Please react to this message or say 'here' to indicate you're present and ready to code today!");
-          } else {
-            console.error('Could not find or access the check-in channel.');
-          }
+          const channel = await this.validateCheckInChannel();
+          await this.sendCheckInMessage(channel);
         } catch (error) {
-          console.error('Error sending daily check-in message:', error);
+          console.error('Failed to schedule daily check-in:', error);
         }
-      });
-      console.log('Daily check-in message scheduled.');
+      }
+    );
+    
+    if (job) {
+      this.scheduledJobs.push(job);
+      // Add this console log to show next scheduled time
+      console.log(`Daily check-in scheduled for ${job.nextInvocation().toLocaleString('en-US', {
+        timeZone: 'America/Los_Angeles',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short'
+      })}`);
     } else {
-      console.warn('CHECK_IN_CHANNEL_ID not found. Daily check-in not scheduled.');
+      console.error('Failed to create check-in schedule');
     }
+  }
+
+  cleanup() {
+    this.scheduledJobs.forEach(job => job.cancel());
+    this.client.destroy();
   }
 }
