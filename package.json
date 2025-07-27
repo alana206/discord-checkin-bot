@@ -1,14 +1,14 @@
 {
-  "name": "discord-js-handler-template",
+  "name": "discord-daily-checkin-bot",
   "version": "1.0.0",
-  "description": "Discord.js Command and Event Handler Template with example Command usages!",
+  "description": "",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js"
   },
-  "author": "Tomato#6966 (author of this template)",
+  "author": "alana andres",
   "license": "ISC",
   "dependencies": {
     "ascii-table": "0.0.9",
