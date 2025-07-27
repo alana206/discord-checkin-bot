@@ -31,7 +31,7 @@ const questions = [
 
 // Initialize bot with environment variables
 const bot = new Bot(
-  process.env.BOT_TOKEN,
+  process.env.DISCORD_TOKEN,      // Use DISCORD_TOKEN everywhere!
   process.env.CHANNEL_ID,
   process.env.RESPONSE_CHANNEL_ID,
   process.env.CHECK_IN_CHANNEL_ID,
@@ -39,18 +39,26 @@ const bot = new Bot(
 );
 
 // Handle shutdown gracefully
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   console.log("Shutting down bot...");
-  bot.cleanup();
+  try {
+    // Call cleanup and await if it returns a Promise
+    const result = bot.cleanup && bot.cleanup();
+    if (result && typeof result.then === "function") {
+      await result;
+    }
+  } catch (e) {
+    console.error("Error during cleanup:", e && e.stack ? e.stack : e);
+  }
   process.exit(0);
 });
 
 process.on("unhandledRejection", (error) => {
-  console.error("Unhandled promise rejection:", error);s
+  console.error("Unhandled promise rejection:", error && error.stack ? error.stack : error);
 });
 
 // Start the bot
 bot.run().catch((error) => {
-  console.error("Failed to start bot:", error);
+  console.error("Failed to start bot:", error && error.stack ? error.stack : error);
   process.exit(1);
 });

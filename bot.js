@@ -1,4 +1,10 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActivityType,
+  Partials,
+} from "discord.js";
 import schedule from "node-schedule";
 import "dotenv/config";
 
@@ -22,6 +28,7 @@ export default class Bot {
     this.retryAttempts = 3;
     this.retryDelay = 5 * 60 * 1000; // 5 minutes
     this.client = new Client({
+      partials: [Partials.Channel],
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
